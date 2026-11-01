@@ -37,12 +37,24 @@ done
 
 # Sustituir las tres operaciones con efectos externos, conservando la lógica real.
 sample_percent=31; sample_power=battery; notify_fail=0; power_fail=0; verify_fail=0
+low_notice_fail=0; mode_query_fail=0
 read_battery() { percent=$sample_percent; power=$sample_power; }
 notify() {
+    case "$1" in 'Modo de bajo consumo activado'*)
+        printf '%s\n' "$1" >> "$test_dir/activation-attempts"
+        if [ "$notify_fail" -ne 0 ] || [ "$low_notice_fail" -ne 0 ]; then
+            echo 'Notificación de activación denegada' >&2; return 1
+        fi
+        printf '%s\n' "$1" >> "$test_dir/activation-delivered"
+        return 0 ;;
+    esac
     echo attempt >> "$test_dir/notices"
     [ "$notify_fail" -eq 0 ] || { echo 'Notificación denegada' >&2; return 1; }
 }
-low_power_value() { cat "$test_dir/mode"; }
+low_power_value() {
+    [ "$mode_query_fail" -eq 0 ] || { echo 'Consulta de energía fallida' >&2; return 1; }
+    cat "$test_dir/mode"
+}
 enable_low_power() {
     echo attempt >> "$test_dir/power-attempts"
     [ "$power_fail" -eq 0 ] || { echo 'Permiso denegado' >&2; return 1; }
@@ -58,6 +70,8 @@ assert_equal "$(count "$test_dir/notices")" 1 '30% avisa una vez con estado pers
 sample_percent=19; check_once; check_once
 assert_equal "$(count "$test_dir/power-attempts")" 1 'salto a 19% activa y verifica una vez'
 assert_equal "$low_done" 1 'activación confirmada'
+assert_equal "$(count "$test_dir/activation-delivered")" 1 'activación confirmada envía un único aviso'
+assert_equal "$(cat "$test_dir/activation-delivered")" 'Modo de bajo consumo activado para uso con batería.' 'texto del aviso de activación'
 sample_power=ac; check_once; sample_power=battery; check_once
 assert_equal "$(count "$test_dir/notices")" 1 'reconectar con poca carga no rearma'
 sample_percent=35; check_once
@@ -67,12 +81,14 @@ assert_equal "$notified:$low_done" 0:0 '36% rearma ambos umbrales'
 sample_percent=18; check_once
 assert_equal "$(count "$test_dir/notices")" 2 'primer chequeo bajo ambos umbrales'
 assert_equal "$(count "$test_dir/power-attempts")" 1 'ya activo no ejecuta pmset'
+assert_equal "$(count "$test_dir/activation-delivered")" 1 'modo ya activo no afirma una nueva activación'
 
 # Sin autorización, enfriar reintentos; un nuevo ciclo sí vuelve a intentar.
 sample_percent=50; check_once
 echo 0 > "$test_dir/mode"
 power_fail=1; sample_percent=20; check_once; check_once
 assert_equal "$low_done" 0 'denegación no marca éxito'
+assert_equal "$(count "$test_dir/activation-delivered")" 1 'activación denegada no envía confirmación'
 assert_equal "$(count "$test_dir/power-attempts")" 2 'denegación no se repite en comprobaciones consecutivas'
 next_power=0; save_state; power_fail=0; check_once
 assert_equal "$low_done" 1 'recuperación tras autorizar'
@@ -89,6 +105,7 @@ sample_percent=50; check_once
 echo 0 > "$test_dir/mode"
 sample_percent=20; verify_fail=1; check_once
 assert_equal "$low_done" 0 'salida cero sin cambio no se considera éxito'
+assert_equal "$low_notice_pending" 0 'activación sin verificar no deja aviso pendiente'
 
 sample_percent=50; check_once
 sample_power=ac; sample_percent=10; check_once
@@ -175,6 +192,72 @@ assert_equal "$interval_minutes" 10 'preferencias anteriores conservan diez minu
 for invalid in 'v2 30 20 0' 'v2 30 20 121' 'v2 30 20 1.5' 'v2 30 20 01' 'v2 30 20 5 extra'; do
     printf '%s\n' "$invalid" > "$data_dir/settings"
     if load_settings 2>/dev/null; then echo 'Se aceptó intervalo inválido' >&2; exit 1; fi
+    passed=$((passed + 1))
+done
+
+# Un fallo del nuevo aviso no vuelve a ejecutar pmset y conserva su propio reintento.
+rm -f "$state_file"
+save_settings 30 20 10
+sample_percent=19; sample_power=battery; verify_fail=0; low_notice_fail=1
+echo 0 > "$test_dir/mode"
+before_power=$(count "$test_dir/power-attempts")
+before_activation=$(count "$test_dir/activation-attempts")
+before_delivered=$(count "$test_dir/activation-delivered")
+check_once; check_once
+assert_equal "$low_done:$low_notice_pending" 1:1 'aviso fallido mantiene activación y pendiente por separado'
+assert_equal "$(count "$test_dir/power-attempts")" "$((before_power + 1))" 'fallo del aviso no repite activación'
+assert_equal "$(count "$test_dir/activation-attempts")" "$((before_activation + 1))" 'fallo del aviso respeta espera de 15 minutos'
+assert_equal "$(count "$test_dir/activation-delivered")" "$before_delivered" 'aviso denegado no se marca entregado'
+saved_retry=$next_low_notice
+save_settings 30 20 25; check_once
+assert_equal "$next_low_notice" "$saved_retry" 'cambiar intervalo conserva espera del aviso pendiente'
+next_low_notice=0; save_state; low_notice_fail=0; check_once; check_once
+assert_equal "$low_done:$low_notice_pending" 1:0 'reintento exitoso limpia solo el aviso pendiente'
+assert_equal "$(count "$test_dir/activation-delivered")" "$((before_delivered + 1))" 'confirmación aceptada una vez tras el reintento'
+assert_equal "$(count "$test_dir/power-attempts")" "$((before_power + 1))" 'reintento del aviso no ejecuta pmset'
+
+# Un estado de las versiones anteriores no produce avisos retrospectivos.
+before_activation=$(count "$test_dir/activation-attempts")
+for legacy_state in 'v1 1 1 0 0' 'v2 1 1 0 0 30 20'; do
+    printf '%s\n' "$legacy_state" > "$state_file"
+    check_once
+    assert_equal "$low_notice_pending" 0 'estado anterior migra sin aviso pendiente'
+done
+assert_equal "$(count "$test_dir/activation-attempts")" "$before_activation" 'actualizar no notifica activaciones anteriores'
+
+# Respetar una desactivación manual mientras se reintenta el aviso.
+sample_percent=80; check_once
+sample_percent=20; low_notice_fail=1; echo 0 > "$test_dir/mode"; check_once
+before_power=$(count "$test_dir/power-attempts")
+before_activation=$(count "$test_dir/activation-attempts")
+echo 0 > "$test_dir/mode"
+next_low_notice=0; save_state; low_notice_fail=0; check_once; check_once
+assert_equal "$low_done:$low_notice_pending" 1:0 'desactivación manual descarta aviso pendiente'
+assert_equal "$(count "$test_dir/power-attempts")" "$before_power" 'desactivación manual no se revierte por el aviso'
+assert_equal "$(count "$test_dir/activation-attempts")" "$before_activation" 'no se notifica un modo que ya está desactivado'
+
+# Las consultas fallidas enfrían los reintentos y una recarga descarta eventos antiguos.
+sample_percent=80; check_once
+sample_percent=20; low_notice_fail=1; echo 0 > "$test_dir/mode"; check_once
+before_power=$(count "$test_dir/power-attempts")
+before_activation=$(count "$test_dir/activation-attempts")
+next_low_notice=0; save_state; mode_query_fail=1; low_notice_fail=0
+if check_once; then echo 'Consulta fallida no propagó el error' >&2; exit 1; fi
+check_once
+assert_equal "$low_notice_pending" 1 'consulta fallida conserva el aviso para reintentar'
+assert_equal "$(count "$test_dir/activation-attempts")" "$before_activation" 'consulta fallida no anuncia activación'
+mode_query_fail=0; next_low_notice=0; save_state; check_once
+assert_equal "$low_notice_pending" 0 'consulta recuperada permite avisar'
+assert_equal "$(count "$test_dir/power-attempts")" "$before_power" 'consulta recuperada no repite pmset'
+sample_percent=80; check_once
+sample_percent=20; low_notice_fail=1; echo 0 > "$test_dir/mode"; check_once
+sample_percent=80; sample_power=ac; check_once
+assert_equal "$low_notice_pending:$next_low_notice" 0:0 'recarga rearma el ciclo y descarta avisos pendientes'
+low_notice_fail=0; sample_power=battery
+
+for invalid_state in 'v3 1 1 0 0 30 20 2 0' 'v3 1 0 0 0 30 20 1 0' 'v3 1 1 0 0 30 20 1 invalid'; do
+    printf '%s\n' "$invalid_state" > "$state_file"
+    if load_state 2>/dev/null; then echo 'Estado de aviso pendiente inválido aceptado' >&2; exit 1; fi
     passed=$((passed + 1))
 done
 

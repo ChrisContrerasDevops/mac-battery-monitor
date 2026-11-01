@@ -1,5 +1,12 @@
 # Historial de cambios
 
+## 0.5.0 — 2026-10-31
+
+- Aviso cuando el monitor activa y verifica el modo de bajo consumo.
+- Avisos de activación persistentes y sin repeticiones, con reintentos separados del cambio de energía.
+- Cancelación del aviso pendiente si el modo se desactiva manualmente o se rearma el ciclo al recargar.
+- Migración de estados anteriores sin notificaciones retrospectivas.
+
 ## 0.4.0 — 2026-10-31
 
 - Intervalo entre comprobaciones configurable de 1 a 120 minutos, con 10 por defecto.

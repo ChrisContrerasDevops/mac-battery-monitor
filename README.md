@@ -19,14 +19,16 @@ Puedes elegir por separado el porcentaje del aviso y el de activación del bajo 
 | Batería | Qué sucede |
 | --- | --- |
 | **30 % o menos** | Un aviso para conectar el cargador. |
-| **20 % o menos** | Activa el bajo consumo si autorizaste ese cambio. |
+| **20 % o menos** | Activa el bajo consumo si autorizaste ese cambio y notifica al confirmar la activación. |
 | **36 % o más** | Rearma las acciones para el siguiente ciclo con los valores predeterminados. |
 
 Las acciones se aplican cuando el Mac usa batería. El estado persistente evita avisos repetidos; los errores tienen reintentos espaciados y logs rotativos. Durante reposo o con el equipo apagado no se ejecuta. La detección puede demorarse aproximadamente el intervalo elegido mientras está despierto, o más durante reposo.
 
+Cuando el monitor activa y verifica el bajo consumo, envía **«Modo de bajo consumo activado para uso con batería»**. El aviso no se repite en cada comprobación ni se envía si el modo ya estaba activo. Si falla la notificación, se reintenta por separado sin volver a activar el modo.
+
 ## Instalar como app
 
-1. Abre `Mac-Battery-Monitor-0.4.0-arm64.dmg` de la carpeta `dist/` después de compilar el paquete, o de una futura publicación en GitHub Releases.
+1. Abre `Mac-Battery-Monitor-0.5.0-arm64.dmg` de la carpeta `dist/` después de compilar el paquete, o de una futura publicación en GitHub Releases.
 2. Arrastra **Mac Battery Monitor.app** a **Applications**. También puedes copiarla a `~/Applications` para instalarla solo para tu usuario.
 3. Si ya tenías una versión anterior, pulsa **Actualizar monitor** antes de guardar los nuevos ajustes.
 4. En **Personalizar monitor**, elige los dos porcentajes y los minutos en **Comprobar cada**. Pulsa **Guardar ajustes** y, si es la primera instalación, **Instalar monitor**.
@@ -59,9 +61,9 @@ Resultados:
 
 ```text
 build/Mac Battery Monitor.app
-dist/Mac-Battery-Monitor-0.4.0-arm64.dmg
-dist/Mac-Battery-Monitor-0.4.0-arm64.zip
-dist/Mac-Battery-Monitor-0.4.0-arm64.sha256
+dist/Mac-Battery-Monitor-0.5.0-arm64.dmg
+dist/Mac-Battery-Monitor-0.5.0-arm64.zip
+dist/Mac-Battery-Monitor-0.5.0-arm64.sha256
 ```
 
 Apple Silicon es la arquitectura predeterminada. La opción `BUILD_ARCH=x86_64` permite compilar una variante Intel; esa variante requiere validación en su propio hardware.

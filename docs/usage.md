@@ -7,13 +7,25 @@ Solución en Bash con herramientas de macOS, sin Python, Homebrew ni paquetes ex
 ## Comportamiento
 
 - **Umbral de aviso o menos, usando batería:** envía una notificación. Por defecto es **30 %**. También funciona si una lectura salta de un lado al otro del umbral o la primera ejecución ya ocurre por debajo.
-- **Umbral de ahorro o menos, usando batería:** intenta activar `pmset -b lowpowermode 1` si tiene la autorización descrita más abajo. Por defecto es **20 %**. Comprueba después que el ajuste haya cambiado.
+- **Umbral de ahorro o menos, usando batería:** intenta activar `pmset -b lowpowermode 1` si tiene la autorización descrita más abajo. Por defecto es **20 %**. Comprueba después que el ajuste haya cambiado y envía una notificación de activación confirmada.
 - **Conectado a corriente:** no avisa ni activa bajo consumo, aunque `pmset` muestre `discharging` por carga optimizada u otra condición.
 - Guarda el estado y los porcentajes entre ejecuciones, reinicios y actualizaciones. Cada acción completada se realiza una vez por ciclo. El ciclo se rearma al alcanzar `mínimo(100, máximo(aviso, ahorro) + 6)`; con los valores predeterminados es **36 %**. Enchufar y desenchufar con poca carga no genera otro aviso.
 - Los fallos de notificación o activación se registran y esperan al menos **15 minutos** antes de reintentarse en una comprobación posterior (normalmente a los **20 minutos**, con el intervalo de 10 minutos). Si el ajuste ya está activo, no vuelve a aplicarlo. Si lo desactivas manualmente después de un éxito, respeta ese cambio hasta otro ciclo.
 - No desactiva automáticamente el bajo consumo: `pmset -b` cambia un ajuste persistente para uso con batería. Al recargar seguirá configurado para futuras descargas hasta que lo cambies en Ajustes del Sistema. El perfil del cargador no cambia.
 
 Un `LaunchAgent` trabaja mientras tu usuario tiene una sesión gráfica iniciada, también con la pantalla bloqueada. No necesita un editor abierto. No hace comprobaciones durante reposo ni con el equipo apagado; al despertar continúa con los intervalos de `launchd`. La detección de un umbral puede demorarse aproximadamente el intervalo elegido mientras el equipo está despierto, sujeta a planificación; el reposo puede prolongar esa demora. No impide que el Mac duerma ni programa despertares.
+
+## Aviso al activarse el bajo consumo
+
+Después de que `pmset` termine correctamente y el monitor verifique `lowpowermode 1` para batería, se solicita este aviso:
+
+> Modo de bajo consumo activado para uso con batería.
+
+Es independiente del aviso de batería baja. Si ambos umbrales se cumplen en una misma comprobación, pueden llegar los dos avisos. No se anuncia una activación si se deniega el cambio, falla la verificación o el modo ya estaba activo antes del intento. Actualizar desde una versión anterior tampoco genera avisos retrospectivos de activaciones pasadas.
+
+La activación confirmada y el aviso pendiente se guardan por separado. Si falla la notificación, se registra el error y se reintenta a partir de 15 minutos, en una comprobación posterior, sin volver a ejecutar `pmset`. Antes de reintentar se comprueba que el modo siga activo. Si lo desactivaste manualmente o se rearmó el ciclo al recargar, se descarta el aviso pendiente. Mientras está conectado a corriente no se envían estos avisos.
+
+Un envío aceptado por macOS no se repite en comprobaciones posteriores. Concentración y los permisos de notificación pueden ocultarlo, igual que el aviso de batería baja.
 
 ## Elegir porcentajes y tiempo entre comprobaciones
 
@@ -30,7 +42,7 @@ Los porcentajes se aplican en la siguiente comprobación, sin mantener la app ab
 
 Los ajustes se guardan en `~/Library/Application Support/MacBatteryMonitor/settings` con permisos privados y reemplazo atómico, bajo el mismo bloqueo que utiliza el monitor. No necesitas editar el archivo a mano. Si no existe, se usan 30 %, 20 % y 10 minutos. Las preferencias antiguas mantienen sus porcentajes y reciben el intervalo de 10 minutos. El comando de dos valores `--configure 40 25` conserva el intervalo que ya esté guardado.
 
-Cambiar un umbral rearma solo su acción y permite un nuevo intento si la batería ya está por debajo del nuevo valor; el otro umbral mantiene su estado. Cambiar solo el intervalo o guardar los mismos porcentajes no repite acciones ni borra las esperas de reintento. El estado de la versión anterior se migra conservando los avisos ya completados. Si tienes una versión anterior a 0.4.0 instalada, actualízala desde la app o vuelve a ejecutar `install.sh` para incorporar el motor que lee estos ajustes.
+Cambiar un umbral rearma solo su acción y permite un nuevo intento si la batería ya está por debajo del nuevo valor; el otro umbral mantiene su estado. Cambiar solo el intervalo o guardar los mismos porcentajes no repite acciones ni borra las esperas de reintento. El estado de la versión anterior se migra conservando los avisos ya completados. Si tienes una versión anterior a 0.5.0 instalada, actualízala desde la app o vuelve a ejecutar `install.sh` para incorporar el motor actual.
 
 La app y el comando de configuración comprueban que el motor instalado corresponda a la versión actual antes de guardar; si es distinto, conservan los ajustes y piden actualizar primero. Los valores seleccionados en la ventana se mantienen mientras actualizas para que puedas guardarlos después.
 

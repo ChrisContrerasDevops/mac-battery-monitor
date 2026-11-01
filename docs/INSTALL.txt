@@ -12,6 +12,8 @@ Comprueba con el intervalo elegido, de 1 a 120 minutos (10 por defecto).
 Puedes cerrar la app y VS Code. Cambiar el intervalo recarga la tarea activa.
 Los porcentajes admiten de 1 a 99. Guardar ajustes no requiere administrador.
 Por defecto avisa al 30 % y activa el ahorro al 20 % si está autorizado.
+Al confirmar que el monitor activó el ahorro, envía un aviso adicional.
+No repite ese aviso si el modo ya estaba activo.
 Para desinstalar: usa el botón Desinstalar monitor. Si autorizaste bajo
 consumo, puedes retirar el permiso con Retirar autorización antes de
 eliminar la app. Los logs y el modo de energía actual se conservan.

@@ -170,27 +170,36 @@ load_state() {
     local version extra
     notified=0; low_done=0; next_notice=0; next_power=0
     state_alert=30; state_power=20
+    low_notice_pending=0; next_low_notice=0
     [ -f "$state_file" ] || return 0
-    IFS=' ' read -r version notified low_done next_notice next_power state_alert state_power extra < "$state_file" || return 1
-    if [ "$version" = v1 ] && [ -z "$state_alert$state_power$extra" ]; then
+    IFS=' ' read -r version notified low_done next_notice next_power state_alert state_power low_notice_pending next_low_notice extra < "$state_file" || return 1
+    if [ "$version" = v1 ] && [ -z "$state_alert$state_power$low_notice_pending$next_low_notice$extra" ]; then
         # Migrar sin repetir avisos ya completados con los valores originales.
         state_alert=30; state_power=20
-    elif [ "$version" != v2 ] || ! validate_thresholds "$state_alert" "$state_power"; then
+        low_notice_pending=0; next_low_notice=0
+    elif [ "$version" = v2 ] && [ -z "$low_notice_pending$next_low_notice$extra" ]; then
+        # Las activaciones previas a este aviso no generan una notificación retrospectiva.
+        low_notice_pending=0; next_low_notice=0
+    elif [ "$version" != v3 ]; then
         printf 'Versión o umbrales de estado inválidos: %s\n' "$state_file" >&2; return 1
     fi
-    if [[ ! "$notified" =~ ^[01]$ || ! "$low_done" =~ ^[01]$ ||
-          ! "$next_notice" =~ ^[0-9]{1,11}$ || ! "$next_power" =~ ^[0-9]{1,11}$ || -n "$extra" ]]; then
+    if ! validate_thresholds "$state_alert" "$state_power" ||
+       [[ ! "$notified" =~ ^[01]$ || ! "$low_done" =~ ^[01]$ ||
+          ! "$next_notice" =~ ^[0-9]{1,11}$ || ! "$next_power" =~ ^[0-9]{1,11}$ ||
+          ! "$low_notice_pending" =~ ^[01]$ || ! "$next_low_notice" =~ ^[0-9]{1,11}$ || -n "$extra" ]] ||
+       { [ "$low_notice_pending" -eq 1 ] && [ "$low_done" -ne 1 ]; }; then
         printf 'Estado inválido: %s. Revisarlo antes de eliminarlo.\n' "$state_file" >&2
         return 1
     fi
     # Forzar base decimal al leer datos persistidos.
     next_notice=$((10#$next_notice)); next_power=$((10#$next_power))
+    next_low_notice=$((10#$next_low_notice))
 }
 
 save_state() {
     local temp
     temp=$(/usr/bin/mktemp "$data_dir/state.XXXXXX") || return 1
-    if ! printf 'v2 %s %s %s %s %s %s\n' "$notified" "$low_done" "$next_notice" "$next_power" "$state_alert" "$state_power" > "$temp"; then
+    if ! printf 'v3 %s %s %s %s %s %s %s %s\n' "$notified" "$low_done" "$next_notice" "$next_power" "$state_alert" "$state_power" "$low_notice_pending" "$next_low_notice" > "$temp"; then
         /bin/rm -f "$temp"; return 1
     fi
     /bin/mv -f "$temp" "$state_file" || { /bin/rm -f "$temp"; return 1; }
@@ -232,7 +241,9 @@ check_once() {
     # Cambiar solo un umbral rearma únicamente su acción, no la otra.
     if [ "$state_alert" -ne "$alert_threshold" ] || [ "$state_power" -ne "$power_threshold" ]; then
         if [ "$state_alert" -ne "$alert_threshold" ]; then notified=0; next_notice=0; fi
-        if [ "$state_power" -ne "$power_threshold" ]; then low_done=0; next_power=0; fi
+        if [ "$state_power" -ne "$power_threshold" ]; then
+            low_done=0; next_power=0; low_notice_pending=0; next_low_notice=0
+        fi
         state_alert=$alert_threshold; state_power=$power_threshold
         save_state || return 1
         log "INFO umbrales actualizados: aviso=$alert_threshold% bajo_consumo=$power_threshold%" || return 1
@@ -243,6 +254,7 @@ check_once() {
     # Histéresis: enchufar con poca carga no habilita otro aviso.
     if [ "$percent" -ge "$rearm_level" ]; then
         notified=0; low_done=0; next_notice=0; next_power=0
+        low_notice_pending=0; next_low_notice=0
         save_state || return 1
     fi
     [ "$power" = battery ] || return 0
@@ -268,10 +280,14 @@ check_once() {
         fi
         if [ "$current" = 1 ]; then
             low_done=1
+            save_state || return 1
             log 'INFO bajo consumo ya activo para batería' || return 1
         elif result=$(enable_low_power 2>&1); then
             if current=$(low_power_value 2>&1) && [ "$current" = 1 ]; then
                 low_done=1
+                low_notice_pending=1; next_low_notice=0
+                # Persistir la activación antes del aviso: un fallo del aviso no repite pmset.
+                save_state || return 1
                 log 'INFO bajo consumo activado y verificado para batería' || return 1
             else
                 log "ERROR pmset terminó sin confirmar activación: $current" || return 1
@@ -280,6 +296,26 @@ check_once() {
             log "ERROR activación no autorizada o fallida: $result; reintento en 15 minutos" || return 1
         fi
         save_state || return 1
+    fi
+
+    if [ "$low_notice_pending" -eq 1 ] && [ "$now" -ge "$next_low_notice" ]; then
+        next_low_notice=$((now + 900))
+        save_state || return 1
+        if ! current=$(low_power_value 2>&1); then
+            log "ERROR verificación para aviso de bajo consumo: $current; reintento en 15 minutos"
+            return 1
+        fi
+        if [ "$current" = 0 ]; then
+            low_notice_pending=0; next_low_notice=0
+            save_state || return 1
+            log 'INFO aviso de activación descartado: el bajo consumo fue desactivado' || return 1
+        elif result=$(notify 'Modo de bajo consumo activado para uso con batería.' 2>&1); then
+            low_notice_pending=0; next_low_notice=0
+            save_state || return 1
+            log 'INFO aviso de activación de bajo consumo enviado al sistema' || return 1
+        else
+            log "ERROR aviso de activación de bajo consumo: $result; reintento en 15 minutos" || return 1
+        fi
     fi
 }
 
