@@ -1,0 +1,21 @@
+MAC BATTERY MONITOR
+
+1. Arrastra Mac Battery Monitor.app a Applications, o a ~/Applications.
+2. Abre la app. Si ya lo tenías instalado, pulsa Actualizar monitor primero.
+   Elige los dos porcentajes y el intervalo en Comprobar cada.
+   Pulsa Guardar ajustes y, si es la primera instalación, Instalar monitor.
+3. Permite las notificaciones y pulsa Probar aviso.
+4. Autorizar bajo consumo es opcional. La app explica por qué necesita
+   administrador antes de que macOS pida autenticación.
+
+Comprueba con el intervalo elegido, de 1 a 120 minutos (10 por defecto).
+Puedes cerrar la app y VS Code. Cambiar el intervalo recarga la tarea activa.
+Los porcentajes admiten de 1 a 99. Guardar ajustes no requiere administrador.
+Por defecto avisa al 30 % y activa el ahorro al 20 % si está autorizado.
+Para desinstalar: usa el botón Desinstalar monitor. Si autorizaste bajo
+consumo, puedes retirar el permiso con Retirar autorización antes de
+eliminar la app. Los logs y el modo de energía actual se conservan.
+
+Esta compilación local tiene firma ad hoc y no está notarizada por Apple.
+Para distribución pública se necesita Developer ID y notarización.
+No desactives las protecciones de seguridad del sistema.
